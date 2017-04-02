@@ -90,7 +90,21 @@ namespace HotCommands
 
         private async Task<int> HandleCommandExpandTask(IWpfTextView textView)
         {
-            var syntaxRoot = await textView.TextSnapshot.GetOpenDocumentInCurrentContextWithChanges().GetSyntaxRootAsync();
+			var textSnapshot = textView.TextSnapshot;
+			var doc = textSnapshot.GetOpenDocumentInCurrentContextWithChanges();
+			if (doc == null)
+			{
+				// Could be we don't have a workspace (expanding selection should work anyway).
+				var wksp = textSnapshot.TextBuffer.GetWorkspace();
+				if (wksp == null)
+				{
+					// That explains it. Nothing in any CodeAnalysis extensions namespace
+					// will work - for some reason a workspace is required.
+					// TODO: Make this work even without a Workspace!
+					return VSConstants.E_ABORT; // TODO: Is there a more appropriate error code?
+				}
+			}
+			var syntaxRoot = await doc.GetSyntaxRootAsync();
             var startPosition = textView.Selection.Start.Position;
             var endPosition = textView.Selection.End.Position;
             var length = endPosition.Position - startPosition.Position;
