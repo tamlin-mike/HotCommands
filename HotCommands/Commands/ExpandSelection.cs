@@ -24,7 +24,7 @@ namespace HotCommands
         public new static void Initialize(Package package)
         {
             Command<ExpandSelection>.Initialize(package);
-            //ForceKeyboardBindings(package);
+            ForceKeyboardBindings(package);
         }
 
         private static void ForceKeyboardBindings(Package package)
@@ -32,17 +32,17 @@ namespace HotCommands
             KeyBindingUtil.Initialize(package);
             // We only want to force this keyboard binding if it is currently set to the default VS shortcut
             // ie. Ctrl+W bound to Edit.SelectCurrentWord
-            //if (KeyBindingUtil.BindingExists("Edit.SelectCurrentWord", "Text Editor::Ctrl+W"))
-            //{
+            if (KeyBindingUtil.BindingExists("Edit.SelectCurrentWord", "Text Editor::Ctrl+W"))
+            {
                 KeyBindingUtil.BindShortcut("Edit.IncreaseSelection", "Text Editor::Ctrl+W");
-            //}
+            }
         }
 
-        public int HandleCommand(IWpfTextView textView, bool expand)
+        public int HandleCommand(CommandFilter filter, IWpfTextView textView, bool expand)
         {
             if (expand)
             {
-                return HandleCommandExpandTask(textView).Result;
+                return HandleCommandExpandTask(filter, textView).Result;
             } 
             else
             {
@@ -88,7 +88,7 @@ namespace HotCommands
             return VSConstants.S_OK;
         }
 
-        private async Task<int> HandleCommandExpandTask(IWpfTextView textView)
+        private async Task<int> HandleCommandExpandTask(CommandFilter filter, IWpfTextView textView)
         {
 			var textSnapshot = textView.TextSnapshot;
 			var doc = textSnapshot.GetOpenDocumentInCurrentContextWithChanges();
@@ -100,8 +100,7 @@ namespace HotCommands
 				{
 					// That explains it. Nothing in any CodeAnalysis extensions namespace
 					// will work - for some reason a workspace is required.
-					// TODO: Make this work even without a Workspace!
-					return VSConstants.E_ABORT; // TODO: Is there a more appropriate error code?
+					return Commands.ProjectLess.NoProj_ExpandSelection.HandleCommandExpandTask(filter, textView);
 				}
 			}
 			var syntaxRoot = await doc.GetSyntaxRootAsync();
