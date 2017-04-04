@@ -33,6 +33,12 @@ namespace HotCommands.Commands.ProjectLess
 		/// <param name="filter"></param>
 		/// <param name="textView"></param>
 		/// <returns></returns>
+		/// <remarks>
+		/// <para>The algorithm currently is as follows:</para>
+		/// <para>From selection start, it walks towards the start of the line, looking for a delimiter.</para>
+		/// <para>It then tries to find a matching delimiter from selection end towards the end of the line.</para>
+		/// <para>If no matching delimiters have been found when reaching the first pos of the line, it gives up.</para>
+		/// </remarks>
 		public static int HandleCommandExpandTask(CommandFilter filter, IWpfTextView textView)
 		{
 			if (textView.Selection.IsEmpty)
@@ -64,30 +70,37 @@ namespace HotCommands.Commands.ProjectLess
 			}
 #endif
 			#endregion // Precondition checks
+			// TODO: This is some hairy stuff. There must be a better solution than this brick.
 			bool pos1JustInsideDelimiter = initSelPos1 > line1.Start && IsLeadingDelimiter(initSelPos1.Subtract(1).GetChar());
 			bool pos2JustInsideDelimiter = initSelPos2 < line2.End   && IsTrailingDelimiter(initSelPos2.GetChar());
-			for (SnapshotPoint tstPos1 = initSelPos1; tstPos1 >= line1.Start; tstPos1 = tstPos1.Subtract(1))
+			bool pos1IsOnDelimiter       = IsLeadingDelimiter(initSelPos1.GetChar());
+			bool pos2IsOnDelimiter       = IsTrailingDelimiter(initSelPos2.Subtract(1).GetChar());
+			bool areOnMatchingDelimiters = pos1IsOnDelimiter && pos2IsOnDelimiter && IsMatchingDelimiters(initSelPos1.GetChar(), initSelPos2.Subtract(1).GetChar());
+			int startAdjust = areOnMatchingDelimiters ? 1 : 0;
+			SnapshotPoint start1 = initSelPos1.Subtract(initSelPos1 > line1.Start ? startAdjust : 0);
+			SnapshotPoint start2 = initSelPos2.Add     (initSelPos2 < line2.End   ? startAdjust : 0);
+			for (SnapshotPoint tstPos1 = start1; tstPos1 >= line1.Start; tstPos1 = tstPos1.Subtract(1))
 			{
 				char ch1 = tstPos1.GetChar();
 				if (!IsLeadingDelimiter(ch1)) { continue; }
-				for (SnapshotPoint tstPos2 = initSelPos2; tstPos2 < line2.End; tstPos2 = tstPos2.Add(1))
+				for (SnapshotPoint tstPos2 = start2; tstPos2 < line2.End; tstPos2 = tstPos2.Add(1))
 				{
 					char ch2 = tstPos2.GetChar();
 					if (!IsMatchingDelimiters(ch1, ch2)) { continue; }
 					// For Select(); pos 1 is the position of the first char, but pos2 is the position _after_ the last char.
-					if (pos1JustInsideDelimiter && pos2JustInsideDelimiter && tstPos1 != initSelPos1)
+					if ((pos1JustInsideDelimiter && pos2JustInsideDelimiter && tstPos1 != start1) ||
+						(pos1IsOnDelimiter && tstPos1 == start1))
 					{
-						// include the delimiters in the selection
-						tstPos2 = tstPos2.Add(1);
+						tstPos2 = tstPos2.Add(1); // include the delimiters in the selection
 					}
 					else
 					{
-						// select only what's inside the delimiters
-						if (!pos1JustInsideDelimiter) { tstPos1 = tstPos1.Add(1); }
+						tstPos1 = tstPos1.Add(1); // select only what's inside the delimiters
 					}
 					textView.Selection.Select(new SnapshotSpan(tstPos1, tstPos2), false);
 					return VSConstants.S_OK;
 				}
+				if (tstPos1 == line1.Start) { break; } // Unfortunately need this due to VS' API.
 			}
 		L_abort:
 			return VSConstants.E_ABORT; // TODO: Is there a more appropriate error code?
