@@ -1,18 +1,20 @@
-﻿//------------------------------------------------------------------------------
+﻿#define FORCE_KEYBINDING // Primarily a development helper
+//------------------------------------------------------------------------------
 // <copyright file="ExpandSelection.cs" company="Company">
 //     Copyright (c) Company.  All rights reserved.
 // </copyright>
 //------------------------------------------------------------------------------
 
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Text.Editor;
-using Microsoft.CodeAnalysis.Text;
 using System.Linq;
-using Microsoft.CodeAnalysis;
-using Microsoft.VisualStudio.Text;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Operations;
+using Microsoft.CodeAnalysis.Text;
+using Microsoft.CodeAnalysis;
 
 namespace HotCommands
 {
@@ -24,9 +26,12 @@ namespace HotCommands
         public new static void Initialize(Package package)
         {
             Command<ExpandSelection>.Initialize(package);
+#if FORCE_KEYBINDING
             ForceKeyboardBindings(package);
+#endif
         }
 
+#if FORCE_KEYBINDING
         private static void ForceKeyboardBindings(Package package)
         {
             KeyBindingUtil.Initialize(package);
@@ -37,12 +42,13 @@ namespace HotCommands
                 KeyBindingUtil.BindShortcut("Edit.IncreaseSelection", "Text Editor::Ctrl+W");
             }
         }
+#endif
 
-        public int HandleCommand(CommandFilter filter, IWpfTextView textView, bool expand)
+        public int HandleCommand(IEditorOperations editorOps, IWpfTextView textView, bool expand)
         {
             if (expand)
             {
-                return HandleCommandExpandTask(filter, textView).Result;
+                return HandleCommandExpandTask(editorOps, textView).Result;
             } 
             else
             {
@@ -88,22 +94,27 @@ namespace HotCommands
             return VSConstants.S_OK;
         }
 
-        private async Task<int> HandleCommandExpandTask(CommandFilter filter, IWpfTextView textView)
+        private async Task<int> HandleCommandExpandTask(IEditorOperations editorOps, IWpfTextView textView)
         {
-			var textSnapshot = textView.TextSnapshot;
-			var doc = textSnapshot.GetOpenDocumentInCurrentContextWithChanges();
-			if (doc == null)
-			{
-				// Could be we don't have a workspace (expanding selection should work anyway).
-				var wksp = textSnapshot.TextBuffer.GetWorkspace();
-				if (wksp == null)
-				{
-					// That explains it. Nothing in any CodeAnalysis extensions namespace
-					// will work - for some reason a workspace is required.
-					return Commands.ProjectLess.NoProj_ExpandSelection.HandleCommandExpandTask(filter, textView);
-				}
-			}
-			var syntaxRoot = await doc.GetSyntaxRootAsync();
+            if (textView.Selection.IsEmpty && editorOps != null)
+            {
+                editorOps.SelectCurrentWord(); // Let the default "Edit.SelectCurrentWord" handle it.
+                return VSConstants.S_OK;
+            }
+            var textSnapshot = textView.TextSnapshot;
+            var doc = textSnapshot.GetOpenDocumentInCurrentContextWithChanges();
+            if (doc == null)
+            {
+                // Could be we don't have a workspace (expanding selection should work anyway).
+                var wksp = textSnapshot.TextBuffer.GetWorkspace();
+                if (wksp == null)
+                {
+                    // That explains it. Nothing in any CodeAnalysis extensions namespace
+                    // will work - for some reason a workspace is required.
+                    return Commands.ProjectLess.NoProj_ExpandSelection.HandleCommandExpandTask(editorOps, textView);
+                }
+            }
+            var syntaxRoot = await doc.GetSyntaxRootAsync();
             var startPosition = textView.Selection.Start.Position;
             var endPosition = textView.Selection.End.Position;
             var length = endPosition.Position - startPosition.Position;
@@ -126,6 +137,8 @@ namespace HotCommands
             int end = selection.End;
             if (trivia.RawKind != 0) // in trivia
             {
+                // 8541 = SyntaxKind.SingleLineCommentTrivia
+                // 8542 = SyntaxKind.MultiLineCommentTrivia
                 if (IsOverlap(trivia.Span, start, end) && (trivia.RawKind == 8542 || trivia.RawKind == 8541)) // in comment so grab comment
                 {
                     finalSpan = trivia.Span;
@@ -180,6 +193,8 @@ namespace HotCommands
             } 
             var children = node.ChildNodesAndTokens();
             // node itself not fully selected, select it first
+            // 8205 = SyntaxKind.OpenBraceToken
+            // 8206 = SyntaxKind.CloseBraceToken
             var firstBracket = children.FirstOrDefault(x => x.RawKind == 8205);
             var lastBracket = children.LastOrDefault(x => x.RawKind == 8206);
             if (firstBracket.RawKind != 0 || lastBracket.RawKind != 0)
@@ -187,6 +202,7 @@ namespace HotCommands
                 // We found an open and close brackets. Check and see if we need to only select the insides of the brackets
                 int start = firstBracket.Span.End;
                 int end;
+                // 8539 = SyntaxKind.EndOfLineTrivia
                 SyntaxTrivia lastEOL = lastBracket.GetLeadingTrivia().LastOrDefault(x => x.RawKind == 8539);
                 if (lastEOL.RawKind == 8539)
                 {

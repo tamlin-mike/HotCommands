@@ -16,7 +16,7 @@ namespace HotCommands
         private readonly IWpfTextView textView;
         private readonly IClassifier classifier;
         private readonly SVsServiceProvider globalServiceProvider;
-        internal readonly IEditorOperations editorOperations;
+        private readonly IEditorOperations editorOperations;
 
         public CommandFilter(IWpfTextView textView, IClassifierAggregatorService aggregatorFactory,
             SVsServiceProvider globalServiceProvider, IEditorOperationsFactoryService editorOperationsFactory)
@@ -40,9 +40,9 @@ namespace HotCommands
                     case Constants.ToggleCommentCmdId:
                         return ToggleComment.Instance.HandleCommand(textView, classifier, GetShellCommandDispatcher(), editorOperations);
                     case Constants.ExpandSelectionCmdId:
-                        return ExpandSelection.Instance.HandleCommand(this, textView, true);
+                        return ExpandSelection.Instance.HandleCommand(editorOperations, textView, true);
                     case Constants.ShrinkSelectionCmdId:
-                        return ExpandSelection.Instance.HandleCommand(this, textView, false);
+                        return ExpandSelection.Instance.HandleCommand(editorOperations, textView, false);
                     case Constants.FormatCodeCmdId:
                         return FormatCode.Instance.HandleCommand(textView, GetShellCommandDispatcher());
                     case Constants.DuplicateSelectionCmdId:

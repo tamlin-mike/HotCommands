@@ -39,68 +39,69 @@ namespace HotCommands.Commands.ProjectLess
 		/// <para>It then tries to find a matching delimiter from selection end towards the end of the line.</para>
 		/// <para>If no matching delimiters have been found when reaching the first pos of the line, it gives up.</para>
 		/// </remarks>
-		public static int HandleCommandExpandTask(CommandFilter filter, IWpfTextView textView)
+		public static int HandleCommandExpandTask(IEditorOperations editorOps, IWpfTextView textView)
 		{
-			if (textView.Selection.IsEmpty)
-			{
-				filter.editorOperations.SelectCurrentWord(); // Let the default "Edit.SelectCurrentWord" handle it.
-				return VSConstants.S_OK;
-			}
 			#region Precondition checks
-			if (filter == null || filter.editorOperations == null) // should be impossible?
+			if (editorOps == null) // should be impossible?
 			{
 				goto L_abort;
 			}
+			if (textView.Selection.IsEmpty)
+			{
+				editorOps.SelectCurrentWord(); // Let the default "Edit.SelectCurrentWord" handle it.
+				return VSConstants.S_OK;
+			}
 			if (textView.Selection.Mode != TextSelectionMode.Stream)
 			{
-				goto L_abort; // We don't yet handle multi-line
+				goto L_abort; // Expand in Box mode seems, as Spock would have said, highly illogical.
 			}
+			#endregion // Precondition checks
 			var initSelPos1 = textView.Selection.Start.Position;
 			var initSelPos2 = textView.Selection.End.Position;
-			ITextSnapshotLine line1 = initSelPos1.GetContainingLine();
-			ITextSnapshotLine line2 = initSelPos2.GetContainingLine();
-			if (line1.LineNumber != line2.LineNumber)
-			{
-				goto L_abort; // We don't yet handle multi-line
-			}
-#if _DEBUG
-			if (initSelPos1 <= line1.Start || initSelPos2 >= line2.End)
-			{
-				goto L_abort; // something is seriously wrong
-			}
-#endif
-			#endregion // Precondition checks
+			ITextSnapshot shot = initSelPos1.Snapshot;
+			// Current intended design:
+			// - If pos1 is just outside a delimiter, but pos2 is not, try to extend the selection by only moving pos2.   Delimiters are included in selection.
+			// - If pos2 is just outside a delimiter, but pos1 is not, try to extend the selection by only moving pos1.   Delimiters are included in selection.
+			// - If both pos1 and pos2 are just inside matching delimiters, extend the selection by 1 in both directions. Delimiters are included in selection.
+			// - If pos1 is just inside a delimiter, but pos2 is not, try to extend the selection by only moving pos2.    Delimiters not included in selection.
+			// - If pos2 is just inside a delimiter, but pos1 is not, try to extend the selection by only moving pos1.    Delimiters not included in selection.
+			// - In any other case, seek pos1 towards start to find a delimiter, then a matching delimiter for pos2.      Delimiters not included in selection.
 			// TODO: This is some hairy stuff. There must be a better solution than this brick.
-			bool pos1JustInsideDelimiter = initSelPos1 > line1.Start && IsLeadingDelimiter(initSelPos1.Subtract(1).GetChar());
-			bool pos2JustInsideDelimiter = initSelPos2 < line2.End   && IsTrailingDelimiter(initSelPos2.GetChar());
-			bool pos1IsOnDelimiter       = IsLeadingDelimiter(initSelPos1.GetChar());
-			bool pos2IsOnDelimiter       = IsTrailingDelimiter(initSelPos2.Subtract(1).GetChar());
-			bool areOnMatchingDelimiters = pos1IsOnDelimiter && pos2IsOnDelimiter && IsMatchingDelimiters(initSelPos1.GetChar(), initSelPos2.Subtract(1).GetChar());
+			int iSelPos1 = initSelPos1.Position;
+			int iSelPos2 = initSelPos2.Position;
+			int selLen = shot.Length;
+			bool canMovePos1 = iSelPos1 > 0;
+			bool canMovePos2 = iSelPos2 < selLen;
+			bool pos1JustInsideDelimiter = canMovePos1 && IsLeadingDelimiter(shot[iSelPos1 - 1]);
+			bool pos2JustInsideDelimiter = canMovePos2 && IsTrailingDelimiter(shot[iSelPos2]);
+			bool bothJustInsideDelimiter = pos1JustInsideDelimiter && pos2JustInsideDelimiter;
+			bool pos1IsOnDelimiter       = IsLeadingDelimiter(shot[iSelPos1]);
+			bool pos2IsOnDelimiter       = IsTrailingDelimiter(shot[iSelPos2 - 1]);
+			bool areOnMatchingDelimiters = pos1IsOnDelimiter && pos2IsOnDelimiter && IsMatchingDelimiters(shot[iSelPos1], shot[iSelPos2 - 1]);
 			int startAdjust = areOnMatchingDelimiters ? 1 : 0;
-			SnapshotPoint start1 = initSelPos1.Subtract(initSelPos1 > line1.Start ? startAdjust : 0);
-			SnapshotPoint start2 = initSelPos2.Add     (initSelPos2 < line2.End   ? startAdjust : 0);
-			for (SnapshotPoint tstPos1 = start1; tstPos1 >= line1.Start; tstPos1 = tstPos1.Subtract(1))
+			int iStart1 = iSelPos1 - (canMovePos1 ? startAdjust : 0);
+			int iStart2 = iSelPos2 + (canMovePos2 ? startAdjust : 0);
+			for (int tstPos1 = iStart1; tstPos1 >= 0; --tstPos1)
 			{
-				char ch1 = tstPos1.GetChar();
+				char ch1 = shot[tstPos1];
 				if (!IsLeadingDelimiter(ch1)) { continue; }
-				for (SnapshotPoint tstPos2 = start2; tstPos2 < line2.End; tstPos2 = tstPos2.Add(1))
+				for (int tstPos2 = iStart2; tstPos2 < selLen; ++tstPos2)
 				{
-					char ch2 = tstPos2.GetChar();
+					char ch2 = shot[tstPos2];
 					if (!IsMatchingDelimiters(ch1, ch2)) { continue; }
 					// For Select(); pos 1 is the position of the first char, but pos2 is the position _after_ the last char.
-					if ((pos1JustInsideDelimiter && pos2JustInsideDelimiter && tstPos1 != start1) ||
-						(pos1IsOnDelimiter && tstPos1 == start1))
+					if ((bothJustInsideDelimiter && tstPos1 != iStart1) ||
+					    (pos1IsOnDelimiter && tstPos1 == iStart1))
 					{
-						tstPos2 = tstPos2.Add(1); // include the delimiters in the selection
+						++tstPos2; // include the delimiters
 					}
 					else
 					{
-						tstPos1 = tstPos1.Add(1); // select only what's inside the delimiters
+						++tstPos1; // exclude the delimiters
 					}
-					textView.Selection.Select(new SnapshotSpan(tstPos1, tstPos2), false);
+					textView.Selection.Select(new SnapshotSpan(new SnapshotPoint(shot, tstPos1), new SnapshotPoint(shot, tstPos2)), false);
 					return VSConstants.S_OK;
 				}
-				if (tstPos1 == line1.Start) { break; } // Unfortunately need this due to VS' API.
 			}
 		L_abort:
 			return VSConstants.E_ABORT; // TODO: Is there a more appropriate error code?
