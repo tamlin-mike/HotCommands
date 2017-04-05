@@ -5,6 +5,7 @@
 // </copyright>
 //------------------------------------------------------------------------------
 
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
@@ -26,12 +27,10 @@ namespace HotCommands
         public new static void Initialize(Package package)
         {
             Command<ExpandSelection>.Initialize(package);
-#if FORCE_KEYBINDING
             ForceKeyboardBindings(package);
-#endif
         }
 
-#if FORCE_KEYBINDING
+        [Conditional("FORCE_KEYBINDING")]
         private static void ForceKeyboardBindings(Package package)
         {
             KeyBindingUtil.Initialize(package);
@@ -42,7 +41,6 @@ namespace HotCommands
                 KeyBindingUtil.BindShortcut("Edit.IncreaseSelection", "Text Editor::Ctrl+W");
             }
         }
-#endif
 
         public int HandleCommand(IEditorOperations editorOps, IWpfTextView textView, bool expand)
         {
